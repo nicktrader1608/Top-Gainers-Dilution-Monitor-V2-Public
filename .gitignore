@@ -1,3 +1,15 @@
 .env
+.env.deprecated_*
 __pycache__/
 *.pyc
+
+# Runtime + machine-specific files
+askedgar_session_cache.json
+askedgar_session_cache.json.tmp
+setup_config.json
+.gc_geometry
+.claude/
+
+# PyInstaller artifacts (rebuild locally)
+build/
+dist/
