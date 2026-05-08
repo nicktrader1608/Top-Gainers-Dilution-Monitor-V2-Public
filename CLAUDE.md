@@ -106,11 +106,21 @@ Everything is in `das_monitor.py` (~1714 lines). No separate modules, no framewo
 ### Top gainers data flow:
 
 1. `_is_premarket()` checks if before 9:30 AM ET
-2. Pre-market: scrapes stockanalysis.com for gappers >= 30% gain
-3. Regular hours: FMP `/stable/biggest-gainers` for session gainers >= 30%
-4. Each ticker filtered via `_mcap_filter()` in parallel (3 workers) — FMP quote only, drops if mcap >= $500M
-5. **No Ask Edgar calls until user clicks a ticker** — keeps the left panel fast and preserves API quota
-6. On click, right panel fetches all Ask Edgar data (8 calls: dilution, float, **news-basic**, screener, dilution-data, chart, gap-stats, offerings, ownership). News uses `/v1/news-basic` (not `/v1/news`) — same headlines/summaries/grok/jmt415 rows, just without article bodies. Verified 4-6x cheaper than full news on news-heavy tickers (EVC: $0.02 vs $0.09; EZGO: $0.01 vs $0.06).
+2. **Both pre-market and regular hours**: TradingView screener (`tradingview_screener` package, with session cookie). FMP `/stable/biggest-gainers` is the fallback if TradingView fails.
+3. Filters applied at the screener query (set 2026-04-23, price floor added 2026-05-08):
+
+| Filter | Pre-market value | Regular hours value |
+|---|---|---|
+| Min gain % | 30% | 30% |
+| Min volume | 50,000 | 500,000 |
+| Min price | **$1.00** | **$1.00** |
+| Max market cap | $500M (post-filter) | $500M (post-filter) |
+| Ticker pattern | 2-4 capital letters | 2-4 capital letters |
+
+The `min_price = 1.0` cull was added 2026-05-08 after sub-penny pump-and-dumps (EVIO, ICNM, GOSY, etc. at $0.0001 with phantom +9,900% gains and millions of volume) were crowding out legitimate small-cap gappers. The volume filter alone doesn't help against sub-pennies — they have plenty of volume; price is the only meaningful cull.
+
+4. **No Ask Edgar calls until user clicks a ticker** — keeps the left panel fast and preserves API quota.
+5. On click, right panel fetches all Ask Edgar data (8 calls: dilution, float, **news-basic**, screener, dilution-data, chart, gap-stats, offerings, ownership). News uses `/v1/news-basic` (not `/v1/news`) — same headlines/summaries/grok/jmt415 rows, just without article bodies. Verified 4-6x cheaper than full news on news-heavy tickers (EVC: $0.02 vs $0.09; EZGO: $0.01 vs $0.06).
 
 ### Ask Edgar API retry logic:
 

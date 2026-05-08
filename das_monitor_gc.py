@@ -356,6 +356,12 @@ def fetch_top_gainers_raw() -> list[dict]:
     """Fetch top gainers from TradingView (real-time with session cookie).
     Works both pre-market and regular hours. Falls back to FMP if TV fails."""
     min_pct = 30
+    # Minimum stock price floor. Sub-penny pump-and-dumps go from $0.00001 to
+    # $0.001 in seconds — that's literally +9,900% with massive volume —
+    # which crowds out legitimate small-cap gappers. Filtering at $1.00
+    # culls the entire sub-dollar pump zone while keeping real plays like
+    # AEHL ($2.44 with 145M vol on 2026-05-08).
+    min_price = 1.0
     try:
         from tradingview_screener import Query, col
     except ImportError:
@@ -373,6 +379,7 @@ def fetch_top_gainers_raw() -> list[dict]:
                 .where(
                     col("premarket_change") > min_pct,
                     col("premarket_volume") > min_pm_vol,
+                    col("premarket_close") >= min_price,
                 )
                 .order_by("premarket_change", ascending=False)
                 .limit(30)
@@ -382,7 +389,11 @@ def fetch_top_gainers_raw() -> list[dict]:
             min_vol = 500_000
             _, df = (Query()
                 .select("name", "close", "change", "volume", "market_cap_basic")
-                .where(col("change") > min_pct, col("volume") > min_vol)
+                .where(
+                    col("change") > min_pct,
+                    col("volume") > min_vol,
+                    col("close") >= min_price,
+                )
                 .order_by("change", ascending=False)
                 .limit(30)
                 .get_scanner_data(cookies=cookies))
@@ -419,7 +430,14 @@ def fetch_top_gainers_raw() -> list[dict]:
 
 
 def _fetch_fmp_gainers_fallback() -> list[dict]:
-    """Fallback: fetch gainers from FMP if TradingView fails."""
+    """Fallback: fetch gainers from FMP if TradingView fails.
+
+    Mirrors the price filter in the TradingView path so the fallback doesn't
+    flood the gainers list with sub-penny pump-and-dumps. FMP's biggest-gainers
+    endpoint doesn't return volume in the response, so we can't replicate the
+    500K volume filter here — price floor is the only cull beyond percent.
+    """
+    min_price = 1.0
     try:
         resp = requests.get(FMP_GAINERS_URL, params={"apikey": FMP_API_KEY}, timeout=15)
         raw = resp.json()
@@ -432,9 +450,11 @@ def _fetch_fmp_gainers_fallback() -> list[dict]:
         if not TICKER_RE.match(symbol): continue
         pct = item.get("changesPercentage", 0)
         if pct < 30: continue
+        price = item.get("price", 0) or 0
+        if price < min_price: continue
         filtered.append({
             "ticker": symbol, "todaysChangePerc": pct,
-            "day": {"c": item.get("price", 0), "v": 0}, "name": item.get("name", ""),
+            "day": {"c": price, "v": 0}, "name": item.get("name", ""),
         })
     return filtered
 
